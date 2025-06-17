@@ -1,238 +1,246 @@
 #!/usr/bin/env bash
-# Automated installer for HTTPS (Squid) and SOCKS5 (Dante) proxies on Ubuntu/Debian/RedHat
-# Designed to run non-interactively via curl -O with fixed ports: HTTPS (3128), SOCKS5 (1080)
+# Combined installer for SOCKS5 (Dante), Shadowsocks-libev, and HTTPS proxy (Squid)
+# Supports Ubuntu/Debian and RedHat-based distributions
 
 set -e
 
-# Output file for proxy configuration
-OUTPUT_FILE="/root/proxy_config.txt"
-
-# Function to draw box around text (for output file and console)
-draw_box() {
-    local title="$1"
-    local content="$2"
-    local width=60
-    local GREEN='\033[0;32m'
-    local YELLOW='\033[1;33m'
-    local NC='\033[0m'
-    local BOLD='\033[1m'
-    local box_output=""
-    
-    box_output+="\n"
-    box_output+="${GREEN}┌$(printf '─%.0s' $(seq 1 $((width-2))))┐${NC}\n"
-    box_output+="${GREEN}│${BOLD}${YELLOW} $(printf "%-*s" $((width-4)) "$title") ${NC}${GREEN}│${NC}\n"
-    box_output+="${GREEN}├$(printf '─%.0s' $(seq 1 $((width-2))))┤${NC}\n"
-    
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            box_output+="${GREEN}│${NC} $(printf "%-*s" $((width-4)) "$line") ${GREEN}│${NC}\n"
-        fi
-    done <<< "$content"
-    
-    box_output+="${GREEN}└$(printf '─%.0s' $(seq 1 $((width-2))))┘${NC}\n"
-    
-    # Print to console and save to file
-    echo -e "$box_output"
-    echo -e "$box_output" >> "$OUTPUT_FILE"
-}
-
-# Function to check if port is in use
-check_port() {
-    local port="$1"
-    if ss -tuln | grep -q ":${port}\b"; then
-        echo "❌ Port ${port} is already in use." | tee -a "$OUTPUT_FILE"
-        exit 1
+# ==================================================================================
+#                            🌐 Firewall (UFW) Setup
+# ==================================================================================
+# Automatic installation and enabling of UFW on Debian/Ubuntu
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$ID" == "ubuntu" || "$ID" == "debian" ]]; then
+        echo "🔧 Installing UFW firewall..."
+        apt-get update >/dev/null 2>&1
+        apt-get install -y ufw >/dev/null 2>&1
+        ufw allow ssh >/dev/null 2>&1
+        ufw --force enable >/dev/null 2>&1
+        echo "✅ UFW installed and enabled"
     fi
-}
+fi
 
-# Function to create GCP firewall rule
-create_gcp_firewall_rule() {
-    local rule_name="$1"
-    local port="$2"
-    local target_tag="http-server"
-    gcloud compute firewall-rules create "$rule_name" \
-        --network default \
-        --priority 1000 \
-        --direction INGRESS \
-        --action ALLOW \
-        --target-tags "$target_tag" \
-        --source-ranges "$ALLOWED_IPS" \
-        --allow tcp:"$port" >/dev/null 2>&1 || echo "⚠️ Failed to create GCP firewall rule $rule_name" | tee -a "$OUTPUT_FILE"
-}
-
-# Detect OS
+# Detect OS type
 OS=""
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "$ID" in
-        ubuntu|debian) OS="debian" ;;
-        amzn|centos|rhel|rocky|almalinux) OS="redhat" ;;
-        *) echo "❌ Unsupported OS: $ID" | tee -a "$OUTPUT_FILE"; exit 1 ;;
+        ubuntu|debian) OS="debian" ;;        
+        amzn|centos|rhel|rocky|almalinux) OS="redhat" ;;        
+        *) echo "❌ Unsupported OS: $ID"; exit 1 ;;    
     esac
 else
-    echo "❌ Cannot detect OS." | tee -a "$OUTPUT_FILE"
-    exit 1
+    echo "❌ Cannot detect OS."; exit 1
 fi
 
-# Get network interface and public IP
+# User selections
+echo "Select server(s) to install:"
+echo "  1) SOCKS5 (Dante)"
+echo "  2) Shadowsocks-libev"
+echo "  3) Both SOCKS5 & Shadowsocks"
+echo "  4) HTTPS proxy (Squid)"
+read -p "Enter choice [1-4]: " choice
+
+echo ""
+echo "Select configuration mode:"
+echo "  1) Automatic (random credentials)"
+echo "  2) Manual (custom credentials)"
+read -p "Enter choice [1 or 2]: " config_mode
+
+# Network info
 EXT_IF=$(ip route | awk '/default/ {print $5; exit}')
 EXT_IF=${EXT_IF:-eth0}
 PUBLIC_IP=$(curl -4 -s https://api.ipify.org)
-if [ -z "$PUBLIC_IP" ]; then
-    echo "❌ Failed to get public IP." | tee -a "$OUTPUT_FILE"
-    exit 1
-fi
 
-# Default configuration
-CHOICE=3  # Install both HTTPS and SOCKS5
-CONFIG_MODE=1  # Automatic mode
-ALLOWED_IPS="0.0.0.0/0"  # Allow all IPs
-
-# Function to install HTTPS proxy (Squid)
-install_https() {
-    local USERNAME="proxy_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
-    local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=3128  # Fixed port for HTTPS
-    check_port "$PORT"
-
-    echo "🚀 Installing HTTPS proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
-
-    # Install packages
-    if [ "$OS" = "debian" ]; then
-        apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y squid apache2-utils curl iptables iptables-persistent -qq
-    else
-        yum install -y epel-release -q
-        yum install -y squid httpd-tools curl iptables-services -q
-        systemctl enable iptables -q
-        systemctl start iptables -q
-    fi
-
-    # Create user
-    htpasswd -b -c /etc/squid/passwd "$USERNAME" "$PASSWORD" >/dev/null 2>&1
-
-    # Configure Squid
-    [ -f /etc/squid/squid.conf ] && cp /etc/squid/squid.conf /etc/squid/squid.conf.bak.$(date +%F_%T)
-    cat > /etc/squid/squid.conf <<EOF
-auth_param basic program /usr/lib/squid/basic_ncsa_auth /etc/squid/passwd
-auth_param basic realm Proxy Authentication
-acl authenticated proxy_auth REQUIRED
-acl allowed_ips src $ALLOWED_IPS
-http_access allow authenticated allowed_ips
-http_access deny all
-http_port 0.0.0.0:$PORT
-EOF
-
-    chmod 640 /etc/squid/passwd
-    chown squid:squid /etc/squid/passwd
-    systemctl restart squid >/dev/null 2>&1 || { echo "❌ Failed to start Squid" | tee -a "$OUTPUT_FILE"; exit 1; }
-    systemctl enable squid >/dev/null 2>&1
-
-    # Open local firewall
-    if [ "$OS" = "debian" ]; then
-        if command -v ufw >/dev/null 2>&1; then
-            ufw allow "$PORT"/tcp >/dev/null 2>&1
-        else
-            iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
-            iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
-        fi
-    else
-        firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
-        firewall-cmd --reload >/dev/null 2>&1
-    fi
-
-    # Open GCP firewall
-    create_gcp_firewall_rule "allow-https-proxy-$PORT" "$PORT"
-
-    # Check service status
-    if ! systemctl is-active --quiet squid; then
-        echo "❌ Squid service is not running." | tee -a "$OUTPUT_FILE"
-        exit 1
-    fi
-
-    echo "https://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
+# Manual credential prompts
+get_manual_socks5_credentials() {
+    read -p "Enter SOCKS5 port (default: 443): " MANUAL_PORT
+    MANUAL_PORT=${MANUAL_PORT:-443}
+    read -p "Enter SOCKS5 username (default: cr4ckpwd): " MANUAL_USERNAME
+    MANUAL_USERNAME=${MANUAL_USERNAME:-cr4ckpwd}
+    read -p "Enter SOCKS5 password (default: vunghiabui): " MANUAL_PASSWORD
+    MANUAL_PASSWORD=${MANUAL_PASSWORD:-vunghiabui}
 }
 
-# Function to install SOCKS5 (Dante)
+get_manual_shadowsocks_credentials() {
+    read -p "Enter Shadowsocks port (default: 443): " MANUAL_SS_PORT
+    MANUAL_SS_PORT=${MANUAL_SS_PORT:-443}
+    read -p "Enter Shadowsocks password (default: vunghiabui): " MANUAL_SS_PASSWORD
+    MANUAL_SS_PASSWORD=${MANUAL_SS_PASSWORD:-vunghiabui}
+}
+
+get_manual_https_credentials() {
+    read -p "Enter HTTPS proxy port (default: 3128): " MANUAL_HTTPS_PORT
+    MANUAL_HTTPS_PORT=${MANUAL_HTTPS_PORT:-3128}
+    read -p "Enter HTTPS proxy username (default: proxyuser): " MANUAL_HTTPS_USER
+    MANUAL_HTTPS_USER=${MANUAL_HTTPS_USER:-proxyuser}
+    read -p "Enter HTTPS proxy password (default: proxypass): " MANUAL_HTTPS_PASS
+    MANUAL_HTTPS_PASS=${MANUAL_HTTPS_PASS:-proxypass}
+}
+
+# Install SOCKS5 (Dante)
 install_socks5() {
-    local USERNAME="socks_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
-    local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=1080  # Fixed port for SOCKS5
-    check_port "$PORT"
-
-    echo "🚀 Installing SOCKS5 proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
-
-    # Install packages
-    if [ "$OS" = "debian" ]; then
-        apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server curl iptables iptables-persistent -qq
+    local USERNAME PASSWORD PORT
+    if [ "$config_mode" = "1" ]; then
+        USERNAME="user_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
+        PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
+        PORT=$(shuf -i 1025-65000 -n1)
     else
-        yum install -y epel-release -q
-        yum install -y dante-server curl iptables-services -q
-        systemctl enable iptables -q
-        systemctl start iptables -q
+        get_manual_socks5_credentials
+        USERNAME="$MANUAL_USERNAME"
+        PASSWORD="$MANUAL_PASSWORD"
+        PORT="$MANUAL_PORT"
     fi
-
-    # Create user
+    if [ "$OS" = "debian" ]; then
+        apt-get update >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server curl iptables iptables-persistent >/dev/null 2>&1
+    else
+        yum install -y epel-release >/dev/null 2>&1
+        yum install -y dante-server curl iptables-services >/dev/null 2>&1
+        systemctl enable iptables >/dev/null 2>&1
+        systemctl start iptables >/dev/null 2>&1
+    fi
     useradd -M -N -s /usr/sbin/nologin "$USERNAME" >/dev/null 2>&1 || true
     echo "${USERNAME}:${PASSWORD}" | chpasswd >/dev/null 2>&1
-
-    # Configure Dante
-    [ -f /etc/danted.conf ] && cp /etc/danted.conf /etc/danted.conf.bak.$(date +%F_%T)
     cat > /etc/danted.conf <<EOF
 logoutput: syslog /var/log/danted.log
-internal: 0.0.0.0 port = $PORT
-external: $EXT_IF
+internal: 0.0.0.0 port = ${PORT}
+external: ${EXT_IF}
 method: pam
 user.privileged: root
 user.notprivileged: nobody
-client pass {
-    from: $ALLOWED_IPS to: 0.0.0.0/0
-    log: connect disconnect error
+client pass { from: 0.0.0.0/0 to: 0.0.0.0/0 }
+socks pass { from: 0.0.0.0/0 to: 0.0.0.0/0 command: bind connect udpassociate }
+EOF
+    chmod 644 /etc/danted.conf
+    systemctl restart danted >/dev/null 2>&1
+    systemctl enable danted >/dev/null 2>&1
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow "${PORT}/tcp" >/dev/null 2>&1
+    else
+        iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT >/dev/null 2>&1
+        iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1 || true
+    fi
+    echo "socks5://${PUBLIC_IP}:${PORT}:${USERNAME}:${PASSWORD}"
 }
-socks pass {
-    from: $ALLOWED_IPS to: 0.0.0.0/0
-    command: bind connect udpassociate
-    log: connect disconnect error
+
+# Install Shadowsocks
+install_shadowsocks() {
+    local PASSWORD SERVER_PORT METHOD="aes-256-gcm"
+    if [ "$config_mode" = "1" ]; then
+        PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c16)
+        SERVER_PORT=$((RANDOM % 50000 + 10000))
+    else
+        get_manual_shadowsocks_credentials
+        PASSWORD="$MANUAL_SS_PASSWORD"
+        SERVER_PORT="$MANUAL_SS_PORT"
+    fi
+    if [ "$OS" = "debian" ]; then
+        apt-get update >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt-get install -y shadowsocks-libev qrencode curl iptables iptables-persistent >/dev/null 2>&1
+    else
+        yum install -y epel-release >/dev/null 2>&1
+        yum install -y shadowsocks-libev qrencode curl firewalld >/dev/null 2>&1
+        systemctl enable firewalld >/dev/null 2>&1
+        systemctl start firewalld >/dev/null 2>&1
+    fi
+    cat > /etc/shadowsocks-libev/config.json <<EOF
+{
+  "server":"0.0.0.0",
+  "server_port":${SERVER_PORT},
+  "password":"${PASSWORD}",
+  "timeout":300,
+  "method":"${METHOD}",
+  "fast_open": false,
+  "nameserver":"1.1.1.1",
+  "mode":"tcp_and_udp"
 }
 EOF
-
-    chmod 644 /etc/danted.conf
-    systemctl restart danted >/dev/null 2>&1 || { echo "❌ Failed to start Dante" | tee -a "$OUTPUT_FILE"; exit 1; }
-    systemctl enable danted >/dev/null 2>&1
-
-    # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
-            ufw allow "$PORT"/tcp >/dev/null 2>&1
+            ufw allow ${SERVER_PORT}/tcp >/dev/null 2>&1
+            ufw allow ${SERVER_PORT}/udp >/dev/null 2>&1
         else
-            iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
-            iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
+            iptables -I INPUT -p tcp --dport ${SERVER_PORT} -j ACCEPT >/dev/null 2>&1
+            iptables -I INPUT -p udp --dport ${SERVER_PORT} -j ACCEPT >/dev/null 2>&1
+            iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1 || true
         fi
     else
-        firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
+        firewall-cmd --permanent --add-port=${SERVER_PORT}/tcp >/dev/null 2>&1
+        firewall-cmd --permanent --add-port=${SERVER_PORT}/udp >/dev/null 2>&1
         firewall-cmd --reload >/dev/null 2>&1
     fi
+    systemctl enable shadowsocks-libev >/dev/null 2>&1
+    systemctl restart shadowsocks-libev >/dev/null 2>&1
+    echo "shadowsocks://${PUBLIC_IP}:${SERVER_PORT}:${METHOD}:${PASSWORD}"
+}
 
-    # Open GCP firewall
-    create_gcp_firewall_rule "allow-socks5-proxy-$PORT" "$PORT"
-
-    # Check service status
-    if ! systemctl is-active --quiet danted; then
-        echo "❌ Dante service is not running." | tee -a "$OUTPUT_FILE"
-        exit 1
+# Install HTTPS proxy (Squid)
+install_https_proxy() {
+    local PORT USER PASS
+    if [ "$config_mode" = "1" ]; then
+        PORT=3128
+        USER=user_https_$(tr -dc 'a-z0-9' </dev/urandom | head -c6)
+        PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c10)
+    else
+        get_manual_https_credentials
+        PORT="$MANUAL_HTTPS_PORT"
+        USER="$MANUAL_HTTPS_USER"
+        PASS="$MANUAL_HTTPS_PASS"
     fi
-
-    echo "socks5://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
+    if [ "$OS" = "debian" ]; then
+        apt-get update >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt-get install -y squid apache2-utils >/dev/null 2>&1
+    else
+        yum install -y squid httpd-tools >/dev/null 2>&1
+    fi
+    htpasswd -b -c /etc/squid/passwd "$USER" "$PASS"
+    cp /etc/squid/squid.conf /etc/squid/squid.conf.bak.$(date +%F_%T) >/dev/null 2>&1 || true
+    cat > /etc/squid/squid.conf <<EOF
+auth_param basic program /usr/lib/squid/basic_ncsa_auth /etc/squid/passwd
+auth_param basic realm proxy
+acl authenticated proxy_auth REQUIRED
+http_access allow authenticated
+http_port ${PORT}
+cache deny all
+EOF
+    systemctl restart squid >/dev/null 2>&1
+    systemctl enable squid >/dev/null 2>&1
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow ${PORT}/tcp >/dev/null 2>&1
+    else
+        iptables -I INPUT -p tcp --dport ${PORT} -j ACCEPT >/dev/null 2>&1
+        iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1 || true
+    fi
+    echo "http://${USER}:${PASS}@${PUBLIC_IP}:${PORT}"
 }
 
 # Main logic
-echo "🚀 Starting automated proxy installation..." | tee "$OUTPUT_FILE"
-
-# Install both HTTPS and SOCKS5
-https_info=$(install_https)
-socks_info=$(install_socks5)
-combined_info="${https_info}\n${socks_info}"
-draw_box "🚀 PROXY SERVERS INSTALLED" "$combined_info"
-
-echo "✅ Design by Hùng Sẹo BG." | tee -a "$OUTPUT_FILE"
+case "$choice" in
+    1)
+        echo "🚀 Installing SOCKS5 server..."
+        info=$(install_socks5)
+        draw_box "🧦 SOCKS5 PROXY SERVER" "$info"
+        ;;
+    2)
+        echo "🚀 Installing Shadowsocks server..."
+        info=$(install_shadowsocks)
+        draw_box "👻 SHADOWSOCKS SERVER" "$info"
+        ;;
+    3)
+        echo "🚀 Installing both SOCKS5 and Shadowsocks servers..."
+        socks_info=$(install_socks5)
+        ss_info=$(install_shadowsocks)
+        combined="${socks_info}\n${ss_info}"
+        draw_box "🚀 PROXY SERVERS INSTALLED" "$combined"
+        ;;
+    4)
+        echo "🚀 Installing HTTPS proxy (Squid)..."
+        info=$(install_https_proxy)
+        draw_box "🔐 HTTPS PROXY SERVER" "$info"
+        ;;
+    *)
+        echo "❌ Invalid choice"
+        exit 1
+        ;;
+esac
