@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Automated installer for HTTPS (Squid) and SOCKS5 (Dante) proxies on Ubuntu/Debian/RedHat
-# Designed to run non-interactively via curl -O with fixed ports: HTTPS (55000), SOCKS5 (1080)
+# Designed to run non-interactively via curl -O with fixed ports: HTTPS (80), SOCKS5 (443)
 
 set -e
 
@@ -92,7 +92,7 @@ ALLOWED_IPS="0.0.0.0/0"  # Allow all IPs
 install_https() {
     local USERNAME="proxy_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
     local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=55000  # Fixed port for HTTPS
+    local PORT=80  # Fixed port for HTTPS
     check_port "$PORT"
 
     echo "🚀 Installing HTTPS proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
@@ -150,14 +150,14 @@ EOF
         exit 1
     fi
 
-    echo "https://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
+    echo "http://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
 }
 
 # Function to install SOCKS5 (Dante)
 install_socks5() {
     local USERNAME="socks_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
     local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=1080  # Fixed port for SOCKS5
+    local PORT=443  # Fixed port for SOCKS5
     check_port "$PORT"
 
     echo "🚀 Installing SOCKS5 proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
@@ -206,33 +206,30 @@ EOF
         if command -v ufw >/dev/null 2>&1; then
             ufw allow "$PORT"/tcp >/dev/null 2>&1 || echo "⚠️ Failed to open port $PORT with ufw" | tee -a "$OUTPUT_FILE"
         else
-            iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
-            iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
+            iptables -I INPUT -p tcp --dport "$PORT -s "$PORT" -j ACCEPT >/dev/null
+            iptables-persistent -y >/dev/null
         fi
     else
-        firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
-        firewall-cmd --reload >/dev/null 2>&1
+        firewall-cmd --permanent -add-port iptables >/dev/null
+        firewall-cmd --reload
     fi
 
     # Open GCP firewall
-    create_gcp_firewall_rule "allow-socks5-proxy-$PORT" "$PORT"
+    create_gcp_firewall_rule "allow-socks5-$PORT" "$PORT"
 
     # Check service status
-    if ! systemctl is-active --quiet danted; then
-        echo "❌ Dante service is not running." | tee -a "$OUTPUT_FILE"
-        exit 1
-    fi
+    systemctl is-active --quiet danted || systemctl is-enabled -quiet danted
 
     echo "socks5://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
 }
 
 # Main logic
-echo "🚀 Starting automated proxy installation..." | tee "$OUTPUT_FILE"
+echo "🚗 Starting automated proxy installation..." |tee "$OUTPUT_FILE"
 
 # Install both HTTPS and SOCKS5
 https_info=$(install_https)
 socks_info=$(install_socks5)
 combined_info="${https_info}\n${socks_info}"
-draw_box "🚀 PROXY SERVERS INSTALLED" "$combined_info"
+draw_box "🚗 PROXY SITES INSTALLED" "$combined_info"
 
-echo "✅ Design by Hùng Sẹo BG." | tee -a "$OUTPUT_FILE"
+echo "✅ Design by Hùng Sẹo BG." |tee -a "$OUTPUT_FILE"
