@@ -68,3 +68,12 @@ URL proxy:
   http://${USER}:${PASSWORD}@${PUBLIC_IP}:${PORT}
 ========================
 EOF
+# 9. Display connection information
+echo "========================================"
+echo "SOCKS5 proxy đã sẵn sàng!"
+echo "URL kết nối:" 
+echo "  socks5://${USERNAME}:${PASSWORD}@${PUBLIC_IP}:${PORT}"
+echo ""
+echo "Hùng Sẹo BG"
+echo "========================================"
+
