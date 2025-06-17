@@ -100,7 +100,7 @@ install_https() {
     # Install packages
     if [ "$OS" = "debian" ]; then
         apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y squid apache2-utils curl iptables iptables-persistent -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y squid apache2-utils curl iptables iptables-persistent ufw -qq
     else
         yum install -y epel-release -q
         yum install -y squid httpd-tools curl iptables-services -q
@@ -131,7 +131,7 @@ EOF
     # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
-            ufw allow "$PORT"/tcp >/dev/null 2>&1
+            ufw allow "$PORT"/tcp >/dev/null 2>&1 || echo "⚠️ Failed to open port $PORT with ufw" | tee -a "$OUTPUT_FILE"
         else
             iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
             iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
@@ -165,7 +165,7 @@ install_socks5() {
     # Install packages
     if [ "$OS" = "debian" ]; then
         apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server curl iptables iptables-persistent -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server curl iptables iptables-persistent ufw -qq
     else
         yum install -y epel-release -q
         yum install -y dante-server curl iptables-services -q
@@ -204,7 +204,7 @@ EOF
     # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
-            ufw allow "$PORT"/tcp >/dev/null 2>&1
+            ufw allow "$PORT"/tcp >/dev/null 2>&1 || echo "⚠️ Failed to open port $PORT with ufw" | tee -a "$OUTPUT_FILE"
         else
             iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
             iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
