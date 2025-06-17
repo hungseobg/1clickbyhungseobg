@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Automated installer for HTTPS (Squid) and SOCKS5 (Dante) proxies on Ubuntu/Debian/RedHat
-# Designed to run non-interactively via curl -O
+# Designed to run non-interactively via curl -O with fixed ports: HTTPS (55000), SOCKS5 (1080)
 
 set -e
 
@@ -45,6 +45,21 @@ check_port() {
     fi
 }
 
+# Function to create GCP firewall rule
+create_gcp_firewall_rule() {
+    local rule_name="$1"
+    local port="$2"
+    local target_tag="http-server"
+    gcloud compute firewall-rules create "$rule_name" \
+        --network default \
+        --priority 1000 \
+        --direction INGRESS \
+        --action ALLOW \
+        --target-tags "$target_tag" \
+        --source-ranges "$ALLOWED_IPS" \
+        --allow tcp:"$port" >/dev/null 2>&1 || echo "⚠️ Failed to create GCP firewall rule $rule_name" | tee -a "$OUTPUT_FILE"
+}
+
 # Detect OS
 OS=""
 if [ -f /etc/os-release ]; then
@@ -77,10 +92,10 @@ ALLOWED_IPS="0.0.0.0/0"  # Allow all IPs
 install_https() {
     local USERNAME="proxy_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
     local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=$(shuf -i 1025-65000 -n1)
+    local PORT=55000  # Fixed port for HTTPS
     check_port "$PORT"
 
-    echo "🚀 Installing HTTPS proxy..." | tee -a "$OUTPUT_FILE"
+    echo "🚀 Installing HTTPS proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
 
     # Install packages
     if [ "$OS" = "debian" ]; then
@@ -113,7 +128,7 @@ EOF
     systemctl restart squid >/dev/null 2>&1 || { echo "❌ Failed to start Squid" | tee -a "$OUTPUT_FILE"; exit 1; }
     systemctl enable squid >/dev/null 2>&1
 
-    # Open firewall
+    # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
             ufw allow "$PORT"/tcp >/dev/null 2>&1
@@ -125,6 +140,9 @@ EOF
         firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
         firewall-cmd --reload >/dev/null 2>&1
     fi
+
+    # Open GCP firewall
+    create_gcp_firewall_rule "allow-https-proxy-$PORT" "$PORT"
 
     # Check service status
     if ! systemctl is-active --quiet squid; then
@@ -139,10 +157,10 @@ EOF
 install_socks5() {
     local USERNAME="socks_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
     local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=$(shuf -i 1025-65000 -n1)
+    local PORT=1080  # Fixed port for SOCKS5
     check_port "$PORT"
 
-    echo "🚀 Installing SOCKS5 proxy..." | tee -a "$OUTPUT_FILE"
+    echo "🚀 Installing SOCKS5 proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
 
     # Install packages
     if [ "$OS" = "debian" ]; then
@@ -183,7 +201,7 @@ EOF
     systemctl restart danted >/dev/null 2>&1 || { echo "❌ Failed to start Dante" | tee -a "$OUTPUT_FILE"; exit 1; }
     systemctl enable danted >/dev/null 2>&1
 
-    # Open firewall
+    # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
             ufw allow "$PORT"/tcp >/dev/null 2>&1
@@ -195,6 +213,9 @@ EOF
         firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
         firewall-cmd --reload >/dev/null 2>&1
     fi
+
+    # Open GCP firewall
+    create_gcp_firewall_rule "allow-socks5-proxy-$PORT" "$PORT"
 
     # Check service status
     if ! systemctl is-active --quiet danted; then
@@ -214,4 +235,4 @@ socks_info=$(install_socks5)
 combined_info="${https_info}\n${socks_info}"
 draw_box "🚀 PROXY SERVERS INSTALLED" "$combined_info"
 
-echo "✅ Installation complete. Configuration saved to $OUTPUT_FILE" | tee -a "$OUTPUT_FILE"
+echo "✅ Design by Hùng Sẹo BG." | tee -a "$OUTPUT_FILE"
