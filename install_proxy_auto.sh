@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Automated installer for HTTPS (Squid) and SOCKS5 (Dante) proxies on Ubuntu/Debian/RedHat
-# Designed to run non-interactively via curl -O with fixed ports: HTTPS (80), SOCKS5 (443)
+# Designed to run non-interactively via curl -O with fixed ports: HTTPS (3128), SOCKS5 (1080)
 
 set -e
 
@@ -74,12 +74,6 @@ else
     exit 1
 fi
 
-# Handle minimized Ubuntu systems
-if [ "$OS" = "debian" ] && ! command -v apt-get >/dev/null 2>&1; then
-    echo "⚠️ This is a minimized system. Installing base packages..." | tee -a "$OUTPUT_FILE"
-    unminimize >/dev/null 2>&1 || echo "⚠️ Failed to unminimize system. Manual intervention required." | tee -a "$OUTPUT_FILE"
-fi
-
 # Get network interface and public IP
 EXT_IF=$(ip route | awk '/default/ {print $5; exit}')
 EXT_IF=${EXT_IF:-eth0}
@@ -98,7 +92,7 @@ ALLOWED_IPS="0.0.0.0/0"  # Allow all IPs
 install_https() {
     local USERNAME="proxy_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
     local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=80  # Fixed port for HTTPS
+    local PORT=3128  # Fixed port for HTTPS
     check_port "$PORT"
 
     echo "🚀 Installing HTTPS proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
@@ -106,7 +100,7 @@ install_https() {
     # Install packages
     if [ "$OS" = "debian" ]; then
         apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y squid apache2-utils curl iptables iptables-persistent ufw -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y squid apache2-utils curl iptables iptables-persistent -qq
     else
         yum install -y epel-release -q
         yum install -y squid httpd-tools curl iptables-services -q
@@ -137,7 +131,7 @@ EOF
     # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
-            ufw allow "$PORT"/tcp >/dev/null 2>&1 || echo "⚠️ Failed to open port $PORT with ufw" | tee -a "$OUTPUT_FILE"
+            ufw allow "$PORT"/tcp >/dev/null 2>&1
         else
             iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
             iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
@@ -156,14 +150,14 @@ EOF
         exit 1
     fi
 
-    echo "http://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
+    echo "https://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
 }
 
 # Function to install SOCKS5 (Dante)
 install_socks5() {
     local USERNAME="socks_$(tr -dc 'a-z0-9' </dev/urandom | head -c8)"
     local PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c12)"
-    local PORT=443  # Fixed port for SOCKS5
+    local PORT=1080  # Fixed port for SOCKS5
     check_port "$PORT"
 
     echo "🚀 Installing SOCKS5 proxy on port $PORT..." | tee -a "$OUTPUT_FILE"
@@ -171,7 +165,7 @@ install_socks5() {
     # Install packages
     if [ "$OS" = "debian" ]; then
         apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server curl iptables iptables-persistent ufw -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server curl iptables iptables-persistent -qq
     else
         yum install -y epel-release -q
         yum install -y dante-server curl iptables-services -q
@@ -210,7 +204,7 @@ EOF
     # Open local firewall
     if [ "$OS" = "debian" ]; then
         if command -v ufw >/dev/null 2>&1; then
-            ufw allow "$PORT"/tcp >/dev/null 2>&1 || echo "⚠️ Failed to open port $PORT with ufw" | tee -a "$OUTPUT_FILE"
+            ufw allow "$PORT"/tcp >/dev/null 2>&1
         else
             iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
             iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
@@ -239,6 +233,6 @@ echo "🚀 Starting automated proxy installation..." | tee "$OUTPUT_FILE"
 https_info=$(install_https)
 socks_info=$(install_socks5)
 combined_info="${https_info}\n${socks_info}"
-draw_box "🚀 PROXY SITES INSTALLED" "$combined_info"
+draw_box "🚀 PROXY SERVERS INSTALLED" "$combined_info"
 
 echo "✅ Design by Hùng Sẹo BG." | tee -a "$OUTPUT_FILE"
