@@ -5,6 +5,52 @@
 set -e
 
 # ==================================================================================
+#                            🚀 AMAZON AWS ACCOUNT SERVICES 🚀
+# ==================================================================================
+#  Need AWS Account? VPS? Cloud Services? Contact us for the best prices!
+#  📧 Contact: https://www.facebook.com/vunghia.bui.750
+#  💰 Amazon AWS Account - Verified & Ready to use
+#  🌐 VPS & Cloud Solutions - Professional Support
+#  ⚡ Fast Setup - Reliable Service - Competitive Prices
+# ==================================================================================
+
+echo "=================================================================================="
+echo "                          🚀 AMAZON AWS ACCOUNT SERVICES 🚀"
+echo "=================================================================================="
+echo " Need AWS Account? VPS? Cloud Services? Contact us for the best prices!"
+echo " 📧 Contact: https://www.facebook.com/vunghia.bui.750"
+echo " 💰 Amazon AWS Account - Verified & Ready to use"
+echo " 🌐 VPS & Cloud Solutions - Professional Support"
+echo " ⚡ Fast Setup - Reliable Service - Competitive Prices"
+echo "=================================================================================="
+echo ""
+
+# ==================================================================================
+#                          Function to draw boxed output
+# ==================================================================================
+draw_box() {
+    local title="$1"
+    local content="$2"
+    local width=60
+    local GREEN='\033[0;32m'
+    local YELLOW='\033[1;33m'
+    local NC='\033[0m'
+    local BOLD='\033[1m'
+
+    echo ""
+    echo -e "${GREEN}┌$(printf '─%.0s' $(seq 1 $((width-2))))┐${NC}"
+    echo -e "${GREEN}│${BOLD}${YELLOW} $(printf "%-*s" $((width-4)) "$title") ${NC}${GREEN}│${NC}"
+    echo -e "${GREEN}├$(printf '─%.0s' $(seq 1 $((width-2))))┤${NC}"
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            echo -e "${GREEN}│${NC} $(printf "%-*s" $((width-4)) "$line") ${GREEN}│${NC}"
+        fi
+    done <<< "$content"
+    echo -e "${GREEN}└$(printf '─%.0s' $(seq 1 $((width-2))))┘${NC}"
+    echo ""
+}
+
+# ==================================================================================
 #                            🌐 Firewall (UFW) Setup
 # ==================================================================================
 # Automatic installation and enabling of UFW on Debian/Ubuntu
@@ -104,7 +150,7 @@ install_socks5() {
     echo "${USERNAME}:${PASSWORD}" | chpasswd >/dev/null 2>&1
     cat > /etc/danted.conf <<EOF
 logoutput: syslog /var/log/danted.log
-internal: 0.0.0.0 port = ${PORT}
+ternal: 0.0.0.0 port = ${PORT}
 external: ${EXT_IF}
 method: pam
 user.privileged: root
