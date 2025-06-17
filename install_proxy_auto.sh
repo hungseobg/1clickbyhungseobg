@@ -74,6 +74,12 @@ else
     exit 1
 fi
 
+# Handle minimized Ubuntu systems
+if [ "$OS" = "debian" ] && ! command -v apt-get >/dev/null 2>&1; then
+    echo "⚠️ This is a minimized system. Installing base packages..." | tee -a "$OUTPUT_FILE"
+    unminimize >/dev/null 2>&1 || echo "⚠️ Failed to unminimize system. Manual intervention required." | tee -a "$OUTPUT_FILE"
+fi
+
 # Get network interface and public IP
 EXT_IF=$(ip route | awk '/default/ {print $5; exit}')
 EXT_IF=${EXT_IF:-eth0}
@@ -206,30 +212,33 @@ EOF
         if command -v ufw >/dev/null 2>&1; then
             ufw allow "$PORT"/tcp >/dev/null 2>&1 || echo "⚠️ Failed to open port $PORT with ufw" | tee -a "$OUTPUT_FILE"
         else
-            iptables -I INPUT -p tcp --dport "$PORT -s "$PORT" -j ACCEPT >/dev/null
-            iptables-persistent -y >/dev/null
+            iptables -I INPUT -p tcp --dport "$PORT" -s "$ALLOWED_IPS" -j ACCEPT >/dev/null 2>&1
+            iptables-save > /etc/iptables/rules.v4 >/dev/null 2>&1
         fi
     else
-        firewall-cmd --permanent -add-port iptables >/dev/null
-        firewall-cmd --reload
+        firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
+        firewall-cmd --reload >/dev/null 2>&1
     fi
 
     # Open GCP firewall
-    create_gcp_firewall_rule "allow-socks5-$PORT" "$PORT"
+    create_gcp_firewall_rule "allow-socks5-proxy-$PORT" "$PORT"
 
     # Check service status
-    systemctl is-active --quiet danted || systemctl is-enabled -quiet danted
+    if ! systemctl is-active --quiet danted; then
+        echo "❌ Dante service is not running." | tee -a "$OUTPUT_FILE"
+        exit 1
+    fi
 
     echo "socks5://$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
 }
 
 # Main logic
-echo "🚗 Starting automated proxy installation..." |tee "$OUTPUT_FILE"
+echo "🚀 Starting automated proxy installation..." | tee "$OUTPUT_FILE"
 
 # Install both HTTPS and SOCKS5
 https_info=$(install_https)
 socks_info=$(install_socks5)
 combined_info="${https_info}\n${socks_info}"
-draw_box "🚗 PROXY SITES INSTALLED" "$combined_info"
+draw_box "🚀 PROXY SITES INSTALLED" "$combined_info"
 
-echo "✅ Design by Hùng Sẹo BG." |tee -a "$OUTPUT_FILE"
+echo "✅ Design by Hùng Sẹo BG." | tee -a "$OUTPUT_FILE"
