@@ -4,26 +4,6 @@
 
 set -e
 
-# ==================================================================================
-#                            🚀 AMAZON AWS ACCOUNT SERVICES 🚀
-# ==================================================================================
-#  Need AWS Account? VPS? Cloud Services? Contact us for the best prices!
-#  📧 Contact: https://www.facebook.com/vunghia.bui.750
-#  💰 Amazon AWS Account - Verified & Ready to use
-#  🌐 VPS & Cloud Solutions - Professional Support
-#  ⚡ Fast Setup - Reliable Service - Competitive Prices
-# ==================================================================================
-
-echo "=================================================================================="
-echo "                          🚀 AMAZON AWS ACCOUNT SERVICES 🚀"
-echo "=================================================================================="
-echo " Need AWS Account? VPS? Cloud Services? Contact us for the best prices!"
-echo " 📧 Contact: https://www.facebook.com/vunghia.bui.750"
-echo " 💰 Amazon AWS Account - Verified & Ready to use"
-echo " 🌐 VPS & Cloud Solutions - Professional Support"
-echo " ⚡ Fast Setup - Reliable Service - Competitive Prices"
-echo "=================================================================================="
-echo ""
 
 # ==================================================================================
 #                          Function to draw boxed output
